@@ -150,16 +150,11 @@ async function main() {
   // Check if the tab is already muted by the user
   const currentlyMuted = await isTabMuted();
   
-  // If this is the first time we're checking, initialize userMuted state
-  if (state.userMuted === false && currentlyMuted) {
+  // Track the user's mute preference but don't let it block our ad-related actions
+  if (state.userMuted === false && currentlyMuted && !state.prevMuted) {
+    // Only consider it user-muted if we didn't mute it ourselves and it's currently muted
     state.userMuted = true;
     logger.debug('Tab was already muted by user');
-  }
-  
-  // Don't interfere if user has manually muted the tab
-  if (state.userMuted) {
-    logger.debug(`User has manually muted tab ${state.tabTitle}`);
-    return Promise.resolve();
   }
   
   const adIsPlaying = isAdPlaying();
@@ -168,11 +163,20 @@ async function main() {
   if (adIsPlaying && !state.prevMuted) {
     logger.info(`Ad detected on ${state.tabTitle}. Muting tab.`);
     await muteTab();
+    // Remember that we muted because of an ad, not user preference
+    state.adMuted = true;
   }
-  // Unmute when ad finishes
-  else if (!adIsPlaying && state.prevMuted) {
+  // Unmute when ad finishes, but only if we muted it for an ad
+  else if (!adIsPlaying && state.prevMuted && state.adMuted) {
     logger.info(`Ad finished on ${state.tabTitle}. Unmuting tab.`);
     await unmuteTab();
+    state.adMuted = false;
+    
+    // If user had manually muted before, restore that state
+    if (state.userMuted) {
+      logger.debug(`Restoring user's mute preference`);
+      await muteTab();
+    }
   }
   
   return Promise.resolve();

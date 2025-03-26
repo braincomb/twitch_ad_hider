@@ -16,8 +16,7 @@
   "content_scripts": [
     {
       "matches": ["*://www.twitch.tv/*"],
-      "js": [
-        "mute_tab.js"]
+      "js": ["mute_tab.js"]
     }
   ],
   "action": {
