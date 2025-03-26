@@ -9,6 +9,12 @@
 const CONFIG = {
   CHECK_INTERVAL_MS: 1000,
   AD_LABEL_SELECTOR: '[data-a-target="video-ad-label"]',
+  AD_COUNTDOWN_SELECTOR: '[data-a-target="video-ad-countdown"]',
+  VIDEO_CONTAINER_SELECTOR: '.video-player__container',
+  PLAYER_CONTROLS_SELECTOR: '[data-a-target="player-controls"]',
+  OVERLAY_ID: 'twitch-ad-muter-overlay',
+  OVERLAY_Z_INDEX: 9000,      // Z-index for our overlay
+  CONTROLS_Z_INDEX: 10000,    // Higher z-index for player controls
   DEBUG: true // Set to false to disable debug logging
 };
 
@@ -17,9 +23,16 @@ let state = {
   tabId: null,         // Current tab ID
   userMuted: false,    // User manually muted the tab
   prevMuted: false,    // Tab was previously muted by extension
+  adMuted: false,      // Whether we muted due to an ad
+  overlayActive: false, // Whether the overlay is currently shown
   oldUrl: window.location.href,
   tabTitle: document.title
 };
+
+// Create overlay elements to be used later
+let adOverlay = null;
+let adTimerElement = null;
+let timerUpdateInterval = null;
 
 // Logging utilities
 const logger = {
@@ -118,6 +131,131 @@ function isAdPlaying() {
 }
 
 /**
+ * Creates and shows a black overlay on top of the video player
+ */
+function showAdOverlay() {
+  // If overlay is already active, don't create another one
+  if (state.overlayActive) {
+    return;
+  }
+  
+  // Find the video container
+  const videoContainer = document.querySelector(CONFIG.VIDEO_CONTAINER_SELECTOR);
+  if (!videoContainer) {
+    logger.error('Could not find video container to add overlay');
+    return;
+  }
+  
+  // Create the overlay if it doesn't exist
+  if (!adOverlay) {
+    adOverlay = document.createElement('div');
+    adOverlay.id = CONFIG.OVERLAY_ID;
+    adOverlay.style.position = 'absolute';
+    adOverlay.style.top = '0';
+    adOverlay.style.left = '0';
+    adOverlay.style.width = '100%';
+    adOverlay.style.height = '100%';
+    adOverlay.style.backgroundColor = 'black';
+    adOverlay.style.zIndex = CONFIG.OVERLAY_Z_INDEX;
+    adOverlay.style.display = 'flex';
+    adOverlay.style.flexDirection = 'column';
+    adOverlay.style.justifyContent = 'center';
+    adOverlay.style.alignItems = 'center';
+    adOverlay.style.color = 'white';
+    adOverlay.style.fontFamily = 'Arial, sans-serif';
+    
+    // Create main message
+    const messageElement = document.createElement('div');
+    messageElement.textContent = 'Ad Muted';
+    messageElement.style.fontSize = '24px';
+    messageElement.style.marginBottom = '10px';
+    adOverlay.appendChild(messageElement);
+    
+    // Create timer element
+    adTimerElement = document.createElement('div');
+    adTimerElement.style.fontSize = '16px';
+    adTimerElement.style.color = '#9147ff'; // Twitch purple
+    adTimerElement.textContent = 'Loading ad time...';
+    adOverlay.appendChild(adTimerElement);
+  }
+  
+  // Add the overlay to the video container
+  videoContainer.style.position = 'relative'; // Ensure container is positioned
+  videoContainer.appendChild(adOverlay);
+  state.overlayActive = true;
+  
+  // Ensure player controls are above our overlay
+  ensureControlsVisible();
+  
+  // Start updating the timer
+  updateAdTimer();
+  timerUpdateInterval = setInterval(updateAdTimer, 500); // Update twice per second
+  
+  logger.info('Ad overlay shown');
+}
+
+/**
+ * Removes the black overlay from the video player
+ */
+function hideAdOverlay() {
+  // If overlay is not active, nothing to do
+  if (!state.overlayActive || !adOverlay) {
+    return;
+  }
+  
+  // Remove the overlay
+  adOverlay.remove();
+  state.overlayActive = false;
+  
+  // Stop updating the timer
+  if (timerUpdateInterval) {
+    clearInterval(timerUpdateInterval);
+    timerUpdateInterval = null;
+  }
+  
+  logger.info('Ad overlay hidden');
+}
+
+/**
+ * Ensures player controls remain visible and accessible above the overlay
+ */
+function ensureControlsVisible() {
+  // Find the player controls
+  const playerControls = document.querySelector(CONFIG.PLAYER_CONTROLS_SELECTOR);
+  
+  if (playerControls) {
+    // Increase z-index to be above our overlay
+    playerControls.style.zIndex = CONFIG.CONTROLS_Z_INDEX;
+    playerControls.style.position = 'relative'; // Ensure positioning context
+    logger.debug('Player controls z-index increased for visibility');
+  } else {
+    logger.error('Could not find player controls');
+  }
+}
+
+/**
+ * Updates the ad countdown timer in the overlay
+ */
+function updateAdTimer() {
+  if (!adTimerElement || !state.overlayActive) {
+    return;
+  }
+  
+  // Find the ad countdown element on the page
+  const countdownElement = document.querySelector(CONFIG.AD_COUNTDOWN_SELECTOR);
+  
+  if (countdownElement) {
+    // Extract the countdown text
+    const countdownText = countdownElement.textContent.trim();
+    
+    // Update our timer display
+    adTimerElement.textContent = `Time remaining: ${countdownText}`;
+  } else {
+    adTimerElement.textContent = '';
+  }
+}
+
+/**
  * Check if the tab is currently muted
  * @returns {Promise<boolean>} - True if muted, false otherwise
  */
@@ -165,6 +303,9 @@ async function main() {
     await muteTab();
     // Remember that we muted because of an ad, not user preference
     state.adMuted = true;
+    
+    // Show the black overlay
+    showAdOverlay();
   }
   // Unmute when ad finishes, but only if we muted it for an ad
   else if (!adIsPlaying && state.prevMuted && state.adMuted) {
@@ -172,11 +313,21 @@ async function main() {
     await unmuteTab();
     state.adMuted = false;
     
+    // Hide the black overlay
+    hideAdOverlay();
+    
     // If user had manually muted before, restore that state
     if (state.userMuted) {
       logger.debug(`Restoring user's mute preference`);
       await muteTab();
     }
+  }
+  // Handle case where overlay might be out of sync with ad state
+  else if (adIsPlaying && !state.overlayActive) {
+    showAdOverlay();
+  }
+  else if (!adIsPlaying && state.overlayActive) {
+    hideAdOverlay();
   }
   
   return Promise.resolve();

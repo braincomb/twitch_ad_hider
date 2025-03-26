@@ -5,7 +5,7 @@
   "description": "Will automatically mute any Twitch streams if it plays an ad.",
   "browser_specific_settings": {
     "gecko": {
-      "id": "twitch-ad-muter@example.com"
+      "id": "twitch-ad-muter@github.com"
     }
   },
   "host_permissions": ["*://www.twitch.tv/*"],
