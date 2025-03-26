@@ -3,7 +3,7 @@
  * Handles tab muting/unmuting functionality
  */
 
-import browser from 'webextension-polyfill';
+// Firefox provides the browser global
 
 // Logging utilities
 const logger = {

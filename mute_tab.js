@@ -3,8 +3,7 @@
  * Automatically mutes Twitch streams during advertisements using browser.tabs API
  */
 
-// Import the browser polyfill for cross-browser compatibility
-import browser from 'webextension-polyfill';
+// Firefox provides the browser global
 
 // Configuration constants
 const CONFIG = {
