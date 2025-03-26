@@ -1,28 +1,26 @@
 /**
  * Twitch Ad Muter - Firefox Extension
- * Automatically mutes Twitch streams during advertisements
+ * Automatically mutes Twitch streams during advertisements using browser.tabs API
  */
+
+// Import the browser polyfill for cross-browser compatibility
+import browser from 'webextension-polyfill';
 
 // Configuration constants
 const CONFIG = {
   CHECK_INTERVAL_MS: 1000,
-  MUTE_BUTTON_SELECTOR: '[data-a-target="player-mute-unmute-button"]',
   AD_LABEL_SELECTOR: '[data-a-target="video-ad-label"]',
-  UNMUTED_BUTTON_LABEL: "Unmute (m)",
   DEBUG: true // Set to false to disable debug logging
 };
 
 // State variables
 let state = {
-  userMuted: false,      // User manually muted the stream
-  prevMuted: false,      // Stream was previously muted by extension
-  initStatus: false,     // Initial mute status when page loads
+  tabId: null,         // Current tab ID
+  userMuted: false,    // User manually muted the tab
+  prevMuted: false,    // Tab was previously muted by extension
   oldUrl: window.location.href,
   tabTitle: document.title
 };
-
-// DOM elements
-let muteButton = document.querySelector(CONFIG.MUTE_BUTTON_SELECTOR);
 
 // Logging utilities
 const logger = {
@@ -33,9 +31,19 @@ const logger = {
   error: (message) => console.error(`[Twitch Ad Muter] ${message}`)
 };
 
-// Initialize
-if (!muteButton) {
-  logger.error(`Cannot find mute button on ${state.tabTitle}`);
+/**
+ * Get the current tab ID
+ * @returns {Promise<number>} - The tab ID
+ */
+async function getCurrentTabId() {
+  try {
+    // We need to send a message to the background script to get the tab ID
+    // since content scripts don't have direct access to the tabs API
+    return await browser.runtime.sendMessage({ action: 'getTabId' });
+  } catch (error) {
+    logger.error(`Failed to get tab ID: ${error.message}`);
+    return null;
+  }
 }
 
 /**
@@ -48,98 +56,58 @@ async function updateUrl() {
     logger.debug(`URL changed to ${newUrl}`);
     state.oldUrl = newUrl;
     state.tabTitle = document.title;
-    
-    // When a user changes channels, the page finishes loading first before
-    // the mute button element is present. We have to wait before we can
-    // check the status of the mute button.
-    setTimeout(updateMuteButton, CONFIG.CHECK_INTERVAL_MS);
   }
   return Promise.resolve();
 }
+
 /**
- * Updates the mute button reference and adds event listeners
+ * Mute the current tab
+ * @returns {Promise<void>}
  */
-function updateMuteButton() {
-  logger.debug("Looking for new mute button");
-  
-  // If the user visited a previous channel in this tab, we need to remove the previous
-  // mute button event listener.
-  if (muteButton) {
-    muteButton.removeEventListener("click", updateUserMuted);
-  }
-  
-  muteButton = document.querySelector(CONFIG.MUTE_BUTTON_SELECTOR);
-  
-  if (muteButton) {
-    state.initStatus = isButtonMuted(muteButton);
-    logger.debug(`Initial mute status = ${state.initStatus}`);
-    muteButton.addEventListener("click", updateUserMuted);
-  } else {
-    logger.error(`Cannot find mute button on ${state.tabTitle}`);
-    // Retry after a delay if we're on a Twitch page but button isn't found yet
-    if (window.location.href.includes('twitch.tv')) {
-      setTimeout(updateMuteButton, CONFIG.CHECK_INTERVAL_MS);
+async function muteTab() {
+  if (!state.tabId) {
+    state.tabId = await getCurrentTabId();
+    if (!state.tabId) {
+      logger.error('Could not get tab ID');
+      return;
     }
   }
-}
 
-/**
- * Updates the user muted state when the mute button is clicked
- * @param {Event} event - Click event
- */
-function updateUserMuted(event) {
-  logger.debug("isTrusted = " + event.isTrusted);
-  
-  if (!event.isTrusted) {
-    logger.debug("Not a user click. Ignoring.");
-    return;
-  }
-  
-  if (isButtonMuted(muteButton)) {
-    logger.debug(`User unmuted stream on ${state.tabTitle}`);
-    state.userMuted = false;
-    state.initStatus = false;
-  } else {
-    logger.info(`User muted stream on ${state.tabTitle}`);
-    state.userMuted = true;
+  try {
+    await browser.runtime.sendMessage({
+      action: 'muteTab',
+      tabId: state.tabId
+    });
+    state.prevMuted = true;
+    logger.info(`Tab muted due to ad: ${state.tabTitle}`);
+  } catch (error) {
+    logger.error(`Failed to mute tab: ${error.message}`);
   }
 }
 
 /**
- * Initialize the extension
+ * Unmute the current tab
+ * @returns {Promise<void>}
  */
-function initialize() {
-  logger.info("Twitch Ad Muter initialized");
-  updateMuteButton();
-  
-  // Set up the main interval
-  setInterval(async () => {
-    try {
-      await updateUrl();
-      await main();
-    } catch (error) {
-      logger.error(`Error in main loop: ${error.message}`);
+async function unmuteTab() {
+  if (!state.tabId) {
+    state.tabId = await getCurrentTabId();
+    if (!state.tabId) {
+      logger.error('Could not get tab ID');
+      return;
     }
-  }, CONFIG.CHECK_INTERVAL_MS);
-}
-
-// Start the extension
-initialize();
-
-
-/**
- * Checks if the button is in muted state
- * @param {HTMLElement} button - The mute button element
- * @returns {boolean} - True if muted, false otherwise
- */
-function isButtonMuted(button) {
-  if (!button || !button.ariaLabel) {
-    logger.debug("Button or ariaLabel not available");
-    return false;
   }
-  
-  logger.debug(`button.ariaLabel = ${button.ariaLabel}`);
-  return button.ariaLabel === CONFIG.UNMUTED_BUTTON_LABEL;
+
+  try {
+    await browser.runtime.sendMessage({
+      action: 'unmuteTab',
+      tabId: state.tabId
+    });
+    state.prevMuted = false;
+    logger.info(`Tab unmuted after ad: ${state.tabTitle}`);
+  } catch (error) {
+    logger.error(`Failed to unmute tab: ${error.message}`);
+  }
 }
 
 /**
@@ -151,20 +119,47 @@ function isAdPlaying() {
 }
 
 /**
+ * Check if the tab is currently muted
+ * @returns {Promise<boolean>} - True if muted, false otherwise
+ */
+async function isTabMuted() {
+  if (!state.tabId) {
+    state.tabId = await getCurrentTabId();
+    if (!state.tabId) {
+      logger.error('Could not get tab ID');
+      return false;
+    }
+  }
+
+  try {
+    const tabInfo = await browser.runtime.sendMessage({
+      action: 'getTabInfo',
+      tabId: state.tabId
+    });
+    return tabInfo && tabInfo.mutedInfo && tabInfo.mutedInfo.muted;
+  } catch (error) {
+    logger.error(`Failed to check tab mute status: ${error.message}`);
+    return false;
+  }
+}
+
+/**
  * Main function that handles muting/unmuting based on ad presence
  * @returns {Promise<void>}
  */
 async function main() {
-  if (!muteButton) {
-    logger.error(`Mute button is not present on ${state.tabTitle}`);
-    // Try to find the button again
-    updateMuteButton();
-    return Promise.resolve();
+  // Check if the tab is already muted by the user
+  const currentlyMuted = await isTabMuted();
+  
+  // If this is the first time we're checking, initialize userMuted state
+  if (state.userMuted === false && currentlyMuted) {
+    state.userMuted = true;
+    logger.debug('Tab was already muted by user');
   }
   
-  // Don't interfere if user has manually set mute preferences
-  if (state.initStatus || state.userMuted) {
-    logger.debug(`Tab started muted or user muted stream on ${state.tabTitle}.`);
+  // Don't interfere if user has manually muted the tab
+  if (state.userMuted) {
+    logger.debug(`User has manually muted tab ${state.tabTitle}`);
     return Promise.resolve();
   }
   
@@ -172,24 +167,51 @@ async function main() {
   
   // Mute when ad starts playing
   if (adIsPlaying && !state.prevMuted) {
-    logger.info(`Ad detected on ${state.tabTitle}. Muting stream.`);
-    try {
-      muteButton.click();
-      state.prevMuted = true;
-    } catch (error) {
-      logger.error(`Failed to mute: ${error.message}`);
-    }
+    logger.info(`Ad detected on ${state.tabTitle}. Muting tab.`);
+    await muteTab();
   }
   // Unmute when ad finishes
   else if (!adIsPlaying && state.prevMuted) {
-    logger.info(`Ad finished on ${state.tabTitle}. Unmuting stream.`);
-    try {
-      muteButton.click();
-      state.prevMuted = false;
-    } catch (error) {
-      logger.error(`Failed to unmute: ${error.message}`);
-    }
+    logger.info(`Ad finished on ${state.tabTitle}. Unmuting tab.`);
+    await unmuteTab();
   }
   
   return Promise.resolve();
 }
+
+/**
+ * Initialize the extension
+ */
+async function initialize() {
+  logger.info("Twitch Ad Muter initialized");
+  
+  // Get the tab ID on initialization
+  state.tabId = await getCurrentTabId();
+  if (!state.tabId) {
+    logger.error('Could not get tab ID during initialization');
+  } else {
+    logger.debug(`Tab ID: ${state.tabId}`);
+  }
+  
+  // Set up the main interval
+  setInterval(async () => {
+    try {
+      await updateUrl();
+      await main();
+    } catch (error) {
+      logger.error(`Error in main loop: ${error.message}`);
+    }
+  }, CONFIG.CHECK_INTERVAL_MS);
+  
+  // Listen for messages from the background script
+  browser.runtime.onMessage.addListener((message) => {
+    if (message.action === 'tabMutedExternally') {
+      state.userMuted = message.muted;
+      logger.debug(`Tab mute state changed externally: ${message.muted}`);
+    }
+    return Promise.resolve();
+  });
+}
+
+// Start the extension
+initialize();

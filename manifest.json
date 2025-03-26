@@ -4,12 +4,18 @@
   "version": "3.0.0",
   "description": "Will automatically mute any Twitch streams if it plays an ad.",
   "host_permissions": ["*://www.twitch.tv/*"],
+  "permissions": ["tabs"],
+  "background": {
+    "scripts": ["background.js"],
+    "type": "module"
+  },
   "content_scripts": [
     {
       "matches": ["*://www.twitch.tv/*"],
       "js": [
         "mute_tab.js"
-      ]
+      ],
+      "type": "module"
     }
   ],
   "action": {
