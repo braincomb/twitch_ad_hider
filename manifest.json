@@ -9,7 +9,7 @@
     }
   },
   "host_permissions": ["*://www.twitch.tv/*"],
-  "permissions": ["tabs"],
+  "permissions": ["tabs", "storage"],
   "background": {
     "scripts": ["background.js"]
   },

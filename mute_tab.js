@@ -26,7 +26,44 @@ let state = {
   adMuted: false,      // Whether we muted due to an ad
   overlayActive: false, // Whether the overlay is currently shown
   oldUrl: window.location.href,
-  tabTitle: document.title
+  tabTitle: document.title,
+  stateInitialized: false, // Whether we've loaded state from storage
+  errorCount: 0,       // Count of consecutive errors
+  lastAdCheck: 0       // Timestamp of last ad check
+};
+
+// Storage utilities
+const storage = {
+  async loadUserMuteState() {
+    if (!state.tabId) return false;
+    
+    try {
+      const isMuted = await browser.runtime.sendMessage({
+        action: 'getUserMuteState',
+        tabId: state.tabId
+      });
+      logger.debug(`Loaded user mute state from storage: ${isMuted}`);
+      return isMuted;
+    } catch (error) {
+      logger.error(`Failed to load user mute state: ${error.message}`);
+      return false;
+    }
+  },
+  
+  async saveUserMuteState(isMuted) {
+    if (!state.tabId) return;
+    
+    try {
+      await browser.runtime.sendMessage({
+        action: 'saveUserMuteState',
+        tabId: state.tabId,
+        isMuted: isMuted
+      });
+      logger.debug(`Saved user mute state to storage: ${isMuted}`);
+    } catch (error) {
+      logger.error(`Failed to save user mute state: ${error.message}`);
+    }
+  }
 };
 
 // Create overlay elements to be used later
@@ -74,51 +111,74 @@ async function updateUrl() {
 
 /**
  * Mute the current tab
- * @returns {Promise<void>}
+ * @param {boolean} isAdMute - Whether this mute is due to an ad (true) or user preference (false)
+ * @returns {Promise<boolean>} - Whether the mute was successful
  */
-async function muteTab() {
+async function muteTab(isAdMute = true) {
   if (!state.tabId) {
     state.tabId = await getCurrentTabId();
     if (!state.tabId) {
       logger.error('Could not get tab ID');
-      return;
+      return false;
     }
   }
 
   try {
-    await browser.runtime.sendMessage({
+    const result = await browser.runtime.sendMessage({
       action: 'muteTab',
       tabId: state.tabId
     });
-    state.prevMuted = true;
-    logger.info(`Tab muted due to ad: ${state.tabTitle}`);
+    
+    if (result) {
+      if (isAdMute) {
+        state.adMuted = true;
+        state.prevMuted = true;
+        logger.info(`Tab muted due to ad: ${state.tabTitle}`);
+      } else {
+        logger.info(`Tab muted due to user preference: ${state.tabTitle}`);
+      }
+      return true;
+    } else {
+      logger.error('Mute command returned false');
+      return false;
+    }
   } catch (error) {
     logger.error(`Failed to mute tab: ${error.message}`);
+    return false;
   }
 }
 
 /**
  * Unmute the current tab
- * @returns {Promise<void>}
+ * @returns {Promise<boolean>} - Whether the unmute was successful
  */
 async function unmuteTab() {
   if (!state.tabId) {
     state.tabId = await getCurrentTabId();
     if (!state.tabId) {
       logger.error('Could not get tab ID');
-      return;
+      return false;
     }
   }
 
   try {
-    await browser.runtime.sendMessage({
+    const result = await browser.runtime.sendMessage({
       action: 'unmuteTab',
       tabId: state.tabId
     });
-    state.prevMuted = false;
-    logger.info(`Tab unmuted after ad: ${state.tabTitle}`);
+    
+    if (result) {
+      state.prevMuted = false;
+      state.adMuted = false;
+      logger.info(`Tab unmuted after ad: ${state.tabTitle}`);
+      return true;
+    } else {
+      logger.error('Unmute command returned false');
+      return false;
+    }
   } catch (error) {
     logger.error(`Failed to unmute tab: ${error.message}`);
+    return false;
   }
 }
 
@@ -227,7 +287,6 @@ function ensureControlsVisible() {
     // Increase z-index to be above our overlay
     playerControls.style.zIndex = CONFIG.CONTROLS_Z_INDEX;
     playerControls.style.position = 'relative'; // Ensure positioning context
-    logger.debug('Player controls z-index increased for visibility');
   } else {
     logger.error('Could not find player controls');
   }
@@ -285,49 +344,83 @@ async function isTabMuted() {
  * @returns {Promise<void>}
  */
 async function main() {
-  // Check if the tab is already muted by the user
-  const currentlyMuted = await isTabMuted();
-  
-  // Track the user's mute preference but don't let it block our ad-related actions
-  if (state.userMuted === false && currentlyMuted && !state.prevMuted) {
-    // Only consider it user-muted if we didn't mute it ourselves and it's currently muted
-    state.userMuted = true;
-    logger.debug('Tab was already muted by user');
-  }
-  
-  const adIsPlaying = isAdPlaying();
-  
-  // Mute when ad starts playing
-  if (adIsPlaying && !state.prevMuted) {
-    logger.info(`Ad detected on ${state.tabTitle}. Muting tab.`);
-    await muteTab();
-    // Remember that we muted because of an ad, not user preference
-    state.adMuted = true;
-    
-    // Show the black overlay
-    showAdOverlay();
-  }
-  // Unmute when ad finishes, but only if we muted it for an ad
-  else if (!adIsPlaying && state.prevMuted && state.adMuted) {
-    logger.info(`Ad finished on ${state.tabTitle}. Unmuting tab.`);
-    await unmuteTab();
-    state.adMuted = false;
-    
-    // Hide the black overlay
-    hideAdOverlay();
-    
-    // If user had manually muted before, restore that state
-    if (state.userMuted) {
-      logger.debug(`Restoring user's mute preference`);
-      await muteTab();
+  // Get the tab ID if we don't have it yet
+  if (!state.tabId) {
+    state.tabId = await getCurrentTabId();
+    if (!state.tabId) {
+      logger.error('Could not get tab ID in main loop');
+      return Promise.resolve();
     }
   }
-  // Handle case where overlay might be out of sync with ad state
+  
+  // Load user mute state from storage if not initialized
+  if (!state.stateInitialized) {
+    state.userMuted = await storage.loadUserMuteState();
+    state.stateInitialized = true;
+    logger.info(`Initialized user mute state from storage: ${state.userMuted}`);
+  }
+  
+  // Check if the tab is currently muted
+  const currentlyMuted = await isTabMuted();
+  
+  // Detect if user manually muted the tab (and we didn't do it)
+  if (!state.userMuted && currentlyMuted && !state.prevMuted && !state.adMuted) {
+    state.userMuted = true;
+    await storage.saveUserMuteState(true);
+    logger.debug(`Detected user manually muted tab, saved preference`);
+  }
+  
+  // Check if an ad is playing
+  const adIsPlaying = isAdPlaying();
+  
+  // CASE 1: Ad starts playing and tab is not muted by extension
+  if (adIsPlaying && !state.adMuted) {
+    logger.info(`Ad detected on ${state.tabTitle}. Muting tab.`);
+    
+    // Force mute regardless of current state
+    const muteSuccess = await muteTab(true);
+    
+    if (muteSuccess) {
+      // Show overlay only if mute was successful
+      showAdOverlay();
+    }
+  }
+  // CASE 2: Ad finishes and tab was muted by extension
+  else if (!adIsPlaying && state.adMuted) {
+    // If user had manually muted before, don't unmute
+    if (state.userMuted) {
+      logger.info(`Ad finished but keeping tab muted due to user preference`);
+      state.adMuted = false;
+      // Keep prevMuted true since we're still muted
+      
+      // Just hide the overlay
+      hideAdOverlay();
+    } else {
+      logger.info(`Ad finished on ${state.tabTitle}. Unmuting tab.`);
+      const unmuteSuccess = await unmuteTab();
+      
+      // Always hide overlay regardless of unmute success
+      hideAdOverlay();
+    }
+  }
+  // CASE 3: Ensure overlay matches ad state
   else if (adIsPlaying && !state.overlayActive) {
+    // Ad is playing but overlay isn't shown
     showAdOverlay();
+    
+    // Double-check mute state
+    if (!currentlyMuted && !state.userMuted) {
+      await muteTab(true);
+    }
   }
   else if (!adIsPlaying && state.overlayActive) {
+    // No ad but overlay is shown
     hideAdOverlay();
+    
+    // Double-check unmute if needed
+    if (currentlyMuted && state.adMuted && !state.userMuted) {
+      await unmuteTab();
+    }
   }
   
   return Promise.resolve();
@@ -343,25 +436,71 @@ async function initialize() {
   state.tabId = await getCurrentTabId();
   if (!state.tabId) {
     logger.error('Could not get tab ID during initialization');
+    // Retry getting tab ID after a short delay
+    setTimeout(initialize, 1000);
+    return;
   } else {
     logger.debug(`Tab ID: ${state.tabId}`);
   }
   
-  // Set up the main interval
-  setInterval(async () => {
+  // Load initial user mute preference
+  state.userMuted = await storage.loadUserMuteState();
+  state.stateInitialized = true;
+  
+  // Check initial mute state
+  const initiallyMuted = await isTabMuted();
+  if (initiallyMuted && !state.userMuted) {
+    // If tab is muted but not by user preference, check if it's an ad
+    const adIsPlaying = isAdPlaying();
+    if (adIsPlaying) {
+      state.adMuted = true;
+      state.prevMuted = true;
+      showAdOverlay();
+    } else {
+      // If muted but no ad, assume user preference
+      state.userMuted = true;
+      await storage.saveUserMuteState(true);
+    }
+  }
+  
+  // Set up the main interval with error handling
+  const mainLoop = setInterval(async () => {
     try {
       await updateUrl();
       await main();
     } catch (error) {
       logger.error(`Error in main loop: ${error.message}`);
+      // If we get too many errors, slow down the polling to avoid flooding
+      if (++state.errorCount > 5) {
+        logger.warn('Too many errors, slowing down polling rate');
+        clearInterval(mainLoop);
+        setTimeout(() => {
+          state.errorCount = 0;
+          initialize(); // Reinitialize with fresh state
+        }, 5000);
+      }
     }
   }, CONFIG.CHECK_INTERVAL_MS);
   
   // Listen for messages from the background script
   browser.runtime.onMessage.addListener((message) => {
     if (message.action === 'tabMutedExternally') {
-      state.userMuted = message.muted;
-      logger.debug(`Tab mute state changed externally: ${message.muted}`);
+      // Only update userMuted if this was a user-initiated change
+      if (message.isUserInitiated) {
+        state.userMuted = message.muted;
+        // Save the user preference
+        storage.saveUserMuteState(message.muted);
+        logger.info(`User ${message.muted ? 'muted' : 'unmuted'} tab externally`);
+        
+        // If user unmuted while we thought it should be muted for an ad
+        if (!message.muted && state.adMuted) {
+          // User wants to hear the ad, respect that
+          state.adMuted = false;
+          logger.info('User unmuted during ad, respecting preference');
+        }
+      } else {
+        logger.debug(`Tab mute state changed by extension: ${message.muted ? 'Muted' : 'Unmuted'}`);
+      }
     }
     return Promise.resolve();
   });
