@@ -1,4 +1,4 @@
-# Mute Twitch Ads - Firefox Extension
+# Mute & Hide Twitch Ads - Firefox Extension
 
 This Firefox extension automatically mutes the tab and hides the video ad when a Twitch stream plays an advertisement and unmutes it when the ad finishes.
 
