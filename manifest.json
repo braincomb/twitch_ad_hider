@@ -1,11 +1,11 @@
 {
   "manifest_version": 3,
-  "name": "Mute Twitch Ads",
+  "name": "Hide Twitch Ads",
   "version": "3.0.0",
-  "description": "Will automatically mute any Twitch streams if it plays an ad.",
+  "description": "Will automatically mute and hide any Twitch streams if it plays an ad.",
   "browser_specific_settings": {
     "gecko": {
-      "id": "twitch-ad-muter@github.com"
+      "id": "twitch-ad-hider@github.com"
     }
   },
   "host_permissions": ["*://www.twitch.tv/*"],
@@ -19,9 +19,15 @@
       "js": ["mute_tab.js"]
     }
   ],
+  "icons": {
+    "16": "icon_96.png",
+    "32": "icon_96.png",
+    "48": "icon_96.png",
+    "96": "icon_96.png"
+  },
   "action": {
     "default_icon": {
-      "48": "twitch_ad_mute_icon_48.png"
+      "96": "icon_96.png"
     }
   }
 }
