@@ -1,5 +1,5 @@
 /**
- * Twitch Ad Muter - Background Script
+ * Twitch Ad Hider - Background Script
  * Handles tab muting/unmuting functionality
  */
 
@@ -7,9 +7,9 @@
 
 // Logging utilities
 const logger = {
-  debug: (message) => console.debug(`[Twitch Ad Muter BG] ${message}`),
-  info: (message) => console.info(`[Twitch Ad Muter BG] ${message}`),
-  error: (message) => console.error(`[Twitch Ad Muter BG] ${message}`)
+  debug: (message) => console.debug(`[Twitch Ad Hider BG] ${message}`),
+  info: (message) => console.info(`[Twitch Ad Hider BG] ${message}`),
+  error: (message) => console.error(`[Twitch Ad Hider BG] ${message}`)
 };
 
 // Storage utilities
@@ -156,4 +156,4 @@ browser.tabs.onRemoved.addListener(async (tabId) => {
   logger.debug(`Tab ${tabId} closed, cleared mute state from storage`);
 });
 
-logger.info('Twitch Ad Muter background script initialized');
+logger.info('Twitch Ad Hider background script initialized');

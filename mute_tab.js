@@ -1,5 +1,5 @@
 /**
- * Twitch Ad Muter - Firefox Extension
+ * Twitch Ad Hider - Firefox Extension
  * Automatically mutes Twitch streams during advertisements using browser.tabs API
  */
 
@@ -133,10 +133,10 @@ let timerUpdateInterval = null;
 // Logging utilities
 const logger = {
   debug: (message) => {
-    if (CONFIG.DEBUG) console.debug(`[Twitch Ad Muter] ${message}`);
+    if (CONFIG.DEBUG) console.debug(`[Twitch Ad Hider] ${message}`);
   },
-  info: (message) => console.info(`[Twitch Ad Muter] ${message}`),
-  error: (message) => console.error(`[Twitch Ad Muter] ${message}`)
+  info: (message) => console.info(`[Twitch Ad Hider] ${message}`),
+  error: (message) => console.error(`[Twitch Ad Hider] ${message}`)
 };
 
 /**
@@ -501,7 +501,7 @@ async function main() {
  * Initialize the extension
  */
 async function initialize() {
-  logger.info("Twitch Ad Muter initialized");
+  logger.info("Twitch Ad Hider initialized");
   
   // Get the tab ID on initialization
   state.tabId = await getCurrentTabId();

@@ -5,7 +5,10 @@
   "description": "Automatically mutes and hides Ad breaks on Twitch.",
   "browser_specific_settings": {
     "gecko": {
-      "id": "twitch-ad-hider@github.com"
+      "id": "twitch-ad-hider@github.com",
+      "data_collection_permissions": {
+        "required": ["none"]
+      }
     }
   },
   "host_permissions": ["*://www.twitch.tv/*"],
