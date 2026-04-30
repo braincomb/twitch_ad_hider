@@ -1,22 +1,13 @@
 {
-  "name": "twitch_ad_mute",
-  "version": "2.0.1",
-  "description": "Browser extension to mute twitch ads.",
+  "name": "twitch_ad_hider",
+  "version": "3.0.0",
+  "description": "Browser extension to mute and hide twitch ads.",
   "main": "mute_tab.js",
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "build": "web-ext build --overwrite-dest"
   },
-  "author": "Alex Ward",
   "license": "ISC",
   "dependencies": {
-    "web-ext": "^7.6.2"
-  },
-  "devDependencies": {
-    "@babel/core": "^7.22.1",
-    "@babel/preset-env": "^7.22.4",
-    "babel-loader": "^9.1.2",
-    "webextension-polyfill": "^0.10.0",
-    "webpack": "^5.85.0",
-    "webpack-cli": "^5.1.1"
+    "web-ext": "^9.2.0"
   }
 }
