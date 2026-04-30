@@ -27,10 +27,69 @@ let state = {
   overlayActive: false, // Whether the overlay is currently shown
   oldUrl: window.location.href,
   tabTitle: document.title,
+  originalTabTitle: null,
+  titleUpdateInterval: null,
   stateInitialized: false, // Whether we've loaded state from storage
   errorCount: 0,       // Count of consecutive errors
   lastAdCheck: 0       // Timestamp of last ad check
 };
+
+function getBaseTabTitle(title) {
+  if (!title) return '';
+  return title
+    .replace(/^Ad:\s*[^-]+\s*-\s*/i, '')
+    .replace(/^Ad\s*\([^)]*\)\s*-\s*/i, '')
+    .replace(/^Ad\s*-\s*/i, '');
+}
+
+function getAdCountdownText() {
+  const countdownElement = document.querySelector(CONFIG.AD_COUNTDOWN_SELECTOR);
+  if (!countdownElement) return '';
+  return (countdownElement.textContent || '').trim();
+}
+
+function updateAdTabTitle() {
+  if (!state.adMuted) return;
+
+  if (!state.originalTabTitle) {
+    state.originalTabTitle = getBaseTabTitle(document.title);
+  }
+
+  const countdownText = getAdCountdownText();
+  const prefix = countdownText ? `${countdownText} - ` : 'Ad - ';
+  const nextTitle = `${prefix}${state.originalTabTitle}`;
+
+  if (document.title !== nextTitle) {
+    document.title = nextTitle;
+  }
+}
+
+function startAdTabTitleUpdates() {
+  if (!state.adMuted) return;
+  if (state.titleUpdateInterval) return;
+  if (!state.originalTabTitle) {
+    state.originalTabTitle = getBaseTabTitle(document.title);
+  }
+  updateAdTabTitle();
+  state.titleUpdateInterval = setInterval(updateAdTabTitle, 500);
+}
+
+function stopAdTabTitleUpdates() {
+  if (state.titleUpdateInterval) {
+    clearInterval(state.titleUpdateInterval);
+    state.titleUpdateInterval = null;
+  }
+
+  if (state.originalTabTitle) {
+    const currentTitle = document.title || '';
+    const currentBase = getBaseTabTitle(currentTitle);
+    if (currentTitle !== state.originalTabTitle && currentBase === state.originalTabTitle) {
+      document.title = state.originalTabTitle;
+    }
+  }
+
+  state.originalTabTitle = null;
+}
 
 // Storage utilities
 const storage = {
@@ -104,7 +163,10 @@ async function updateUrl() {
   if (newUrl !== state.oldUrl) {
     logger.debug(`URL changed to ${newUrl}`);
     state.oldUrl = newUrl;
-    state.tabTitle = document.title;
+    state.tabTitle = getBaseTabTitle(document.title);
+    if (!state.adMuted) {
+      state.originalTabTitle = null;
+    }
   }
   return Promise.resolve();
 }
@@ -309,6 +371,9 @@ function updateAdTimer() {
     
     // Update our timer display
     adTimerElement.textContent = `Time remaining: ${countdownText}`;
+    if (state.adMuted) {
+      updateAdTabTitle();
+    }
   } else {
     adTimerElement.textContent = '';
   }
@@ -381,6 +446,8 @@ async function main() {
     const muteSuccess = await muteTab(true);
     
     if (muteSuccess) {
+      state.originalTabTitle = getBaseTabTitle(document.title);
+      startAdTabTitleUpdates();
       // Show overlay only if mute was successful
       showAdOverlay();
     }
@@ -395,17 +462,20 @@ async function main() {
       
       // Just hide the overlay
       hideAdOverlay();
+      stopAdTabTitleUpdates();
     } else {
       logger.info(`Ad finished on ${state.tabTitle}. Unmuting tab.`);
       const unmuteSuccess = await unmuteTab();
       
       // Always hide overlay regardless of unmute success
       hideAdOverlay();
+      stopAdTabTitleUpdates();
     }
   }
   // CASE 3: Ensure overlay matches ad state
   else if (adIsPlaying && !state.overlayActive) {
     // Ad is playing but overlay isn't shown
+    startAdTabTitleUpdates();
     showAdOverlay();
     
     // Double-check mute state
@@ -416,6 +486,7 @@ async function main() {
   else if (!adIsPlaying && state.overlayActive) {
     // No ad but overlay is shown
     hideAdOverlay();
+    stopAdTabTitleUpdates();
     
     // Double-check unmute if needed
     if (currentlyMuted && state.adMuted && !state.userMuted) {
@@ -455,6 +526,8 @@ async function initialize() {
     if (adIsPlaying) {
       state.adMuted = true;
       state.prevMuted = true;
+      state.originalTabTitle = getBaseTabTitle(document.title);
+      startAdTabTitleUpdates();
       showAdOverlay();
     } else {
       // If muted but no ad, assume user preference

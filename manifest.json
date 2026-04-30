@@ -2,7 +2,7 @@
   "manifest_version": 3,
   "name": "Hide Twitch Ads",
   "version": "3.0.0",
-  "description": "Will automatically mute and hide any Twitch streams if it plays an ad.",
+  "description": "Automatically mutes and hides Ad breaks on Twitch.",
   "browser_specific_settings": {
     "gecko": {
       "id": "twitch-ad-hider@github.com"
