@@ -1,6 +1,6 @@
 {
   "name": "twitch_ad_hider",
-  "version": "3.0.0",
+  "version": "3.0.1",
   "description": "Browser extension to mute and hide twitch ads.",
   "main": "mute_tab.js",
   "scripts": {
